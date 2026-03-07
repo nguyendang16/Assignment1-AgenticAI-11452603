@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# 2. Mock Data (Standardized — do not fetch real data)
+# 2. Mock Data 
 
 EXCHANGE_RATES = {
     "USD_TWD": "32.0",
@@ -52,7 +52,7 @@ available_functions = {
     "get_stock_price": get_stock_price,
 }
 
-# 4. Tool Schemas (OpenAI format, strict mode)
+# 4. Tool Schemas 
 tools = [
     {
         "type": "function",

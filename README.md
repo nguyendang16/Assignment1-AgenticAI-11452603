@@ -18,9 +18,9 @@ A command-line chatbot that answers questions about **exchange rates** and **sto
    pip install -r requirements.txt
    ```
 
-3. **API key:** Create a `.env` file in the project root with your OpenAI (or compatible) API key:
+3. **API key:** Create a `.env` file in the project root with your Google API key:
    ```
-   OPENAI_API_KEY=sk-your-key-here
+   GOOGLE_API_KEY=sk-your-key-here
    ```
    Do not commit `.env` or upload keys.
 
@@ -42,4 +42,4 @@ Type your questions; type `exit` or `quit` to end.
 
 - Python 3.8+
 - OpenAI Python SDK (or compatible API that supports tool/function calling)
-- Model: e.g. `gpt-4o-mini` (or any OpenAI-compatible model with tool use)
+- Model: any OpenAI-compatible model with tool use

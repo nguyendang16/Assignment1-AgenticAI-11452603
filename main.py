@@ -1,17 +1,15 @@
-"""
-Financial Assistant CLI — LLM Agent with Function Map and Parallel Tool Calls.
-Uses mock data for exchange rates and stock prices. No high-level agent frameworks.
-"""
 import json
 import os
-from openai import OpenAI
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 # 1. Setup & Security — API key from environment
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+MODEL_ID = "gemini-2.5-flash"
 
-# 2. Mock Data 
+# 2. Mock Data
 
 EXCHANGE_RATES = {
     "USD_TWD": "32.0",
@@ -53,61 +51,51 @@ available_functions = {
 }
 
 # 4. Tool Schemas 
-tools = [
+tool_declarations = types.Tool(function_declarations=[
     {
-        "type": "function",
-        "function": {
-            "name": "get_exchange_rate",
-            "description": "Get the exchange rate for a currency pair. Supported pairs: USD_TWD, JPY_TWD, EUR_USD.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "currency_pair": {
-                        "type": "string",
-                        "description": "The currency pair, e.g. USD_TWD, JPY_TWD, EUR_USD",
-                    }
-                },
-                "required": ["currency_pair"],
-                "additionalProperties": False,
+        "name": "get_exchange_rate",
+        "description": "Get the exchange rate for a currency pair. Supported pairs: USD_TWD, JPY_TWD, EUR_USD.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "currency_pair": {
+                    "type": "string",
+                    "description": "The currency pair, e.g. USD_TWD, JPY_TWD, EUR_USD",
+                }
             },
-            "strict": True,
+            "required": ["currency_pair"],
         },
     },
     {
-        "type": "function",
-        "function": {
-            "name": "get_stock_price",
-            "description": "Get the current stock price for a symbol. Supported symbols: AAPL, TSLA, NVDA.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol": {
-                        "type": "string",
-                        "description": "Stock ticker symbol, e.g. AAPL, TSLA, NVDA",
-                    }
-                },
-                "required": ["symbol"],
-                "additionalProperties": False,
+        "name": "get_stock_price",
+        "description": "Get the current stock price for a symbol. Supported symbols: AAPL, TSLA, NVDA.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Stock ticker symbol, e.g. AAPL, TSLA, NVDA",
+                }
             },
-            "strict": True,
+            "required": ["symbol"],
         },
     },
-]
+])
 
 
 def run_agent():
     # 5. System prompt (Financial Assistant persona)
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a Financial Assistant. You answer questions about exchange rates "
-                "(USD_TWD, JPY_TWD, EUR_USD) and stock prices (AAPL, TSLA, NVDA). "
-                "Use the provided tools when the user asks for rates or prices. "
-                "Remember context from earlier in the conversation (e.g. 'its price' refers to the last stock discussed)."
-            ),
-        }
-    ]
+    config = types.GenerateContentConfig(
+        system_instruction=(
+            "You are a Financial Assistant. You answer questions about exchange rates "
+            "(USD_TWD, JPY_TWD, EUR_USD) and stock prices (AAPL, TSLA, NVDA). "
+            "Use the provided tools when the user asks for rates or prices. "
+            "Remember context from earlier in the conversation (e.g. 'its price' refers to the last stock discussed)."
+        ),
+        tools=[tool_declarations],
+    )
+
+    contents: list[types.Content] = []
 
     print("Financial Assistant started. Type 'exit' or 'quit' to end.\n")
 
@@ -118,30 +106,31 @@ def run_agent():
         if user_input.lower() in ("exit", "quit"):
             break
 
-        messages.append({"role": "user", "content": user_input})
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=user_input)],
+            )
         )
 
-        response_msg = response.choices[0].message
-        tool_calls = response_msg.tool_calls if response_msg.tool_calls else []
+        response = client.models.generate_content(
+            model=MODEL_ID,
+            contents=contents,
+            config=config,
+        )
 
-        if tool_calls:
-            # Append assistant message (tool call request) to history
-            print(f"[DEBUG] Executing {len(tool_calls)} tool(s) in this turn: {[tc.function.name for tc in tool_calls]}")
-            messages.append(response_msg)
+        response_content = response.candidates[0].content
+        function_calls = response.function_calls
+
+        if function_calls:
+            print(f"[DEBUG] Executing {len(function_calls)} tool(s) in this turn: {[fc.name for fc in function_calls]}")
+            contents.append(response_content)
 
             # 6. Parallel tool calls — execute all and append all results before next LLM call
-            for tool_call in tool_calls:
-                name = tool_call.function.name
-                try:
-                    args = json.loads(tool_call.function.arguments)
-                except json.JSONDecodeError:
-                    args = {}
+            function_response_parts = []
+            for fc in function_calls:
+                name = fc.name
+                args = fc.args or {}
                 print(f"[DEBUG] Calling {name}({args}) -> ", end="")
                 fn = available_functions.get(name)
                 if fn:
@@ -153,25 +142,40 @@ def run_agent():
                 else:
                     result = json.dumps({"error": "Function not found"})
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "name": name,
-                    "content": result,
-                })
+                function_response_parts.append(
+                    types.Part.from_function_response(
+                        name=name,
+                        response=json.loads(result),
+                    )
+                )
 
-            # Single follow-up LLM call for final answer (no tools so it returns text)
-            final_response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
+            contents.append(
+                types.Content(parts=function_response_parts, role="user")
             )
-            final_content = (final_response.choices[0].message.content or "").strip()
-            print(f"Agent: {final_content}")
-            messages.append({"role": "assistant", "content": final_content})
+
+            # Single follow-up LLM call for final answer
+            final_response = client.models.generate_content(
+                model=MODEL_ID,
+                contents=contents,
+                config=config,
+            )
+            final_text = (final_response.text or "").strip()
+            print(f"Agent: {final_text}")
+            contents.append(
+                types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text=final_text)],
+                )
+            )
         else:
-            content = (response_msg.content or "").strip()
-            print(f"Agent: {content}")
-            messages.append({"role": "assistant", "content": content})
+            text = (response.text or "").strip()
+            print(f"Agent: {text}")
+            contents.append(
+                types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text=text)],
+                )
+            )
 
 
 if __name__ == "__main__":

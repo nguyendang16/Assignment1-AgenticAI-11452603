@@ -1,2 +1,4 @@
-openai
+google-genai
 python-dotenv
+requests>=2.28.0
+beautifulsoup4>=4.12.0

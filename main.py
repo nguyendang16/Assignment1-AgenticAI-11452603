@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 # 1. Setup & Security — API key from environment
 load_dotenv()
 client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-MODEL_ID = "gemini-2.5-flash-lite"
+MODEL_ID = "gemini-3.1-flash-lite-preview"
 
 # 2. Mock Data
 
@@ -90,6 +90,9 @@ def run_agent():
             "You are a Financial Assistant. You answer questions about exchange rates "
             "(USD_TWD, JPY_TWD, EUR_USD) and stock prices (AAPL, TSLA, NVDA). "
             "Use the provided tools when the user asks for rates or prices. "
+            "When the user asks to compare, analyze, or evaluate, provide meaningful "
+            "analysis (differences, percentages, which is higher/lower, etc.), "
+            "not just a list of raw numbers. "
             "Remember context from earlier in the conversation (e.g. 'its price' refers to the last stock discussed)."
         ),
         tools=[tool_declarations],

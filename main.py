@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 # 1. Setup & Security — API key from environment
 load_dotenv()
 client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-MODEL_ID = "gemini-2.5-flash"
+MODEL_ID = "gemini-2.5-flash-lite"
 
 # 2. Mock Data
 
@@ -113,20 +113,18 @@ def run_agent():
             )
         )
 
+        # 6. Agentic loop 
         response = client.models.generate_content(
             model=MODEL_ID,
             contents=contents,
             config=config,
         )
 
-        response_content = response.candidates[0].content
-        function_calls = response.function_calls
-
-        if function_calls:
+        while response.function_calls:
+            function_calls = response.function_calls
             print(f"[DEBUG] Executing {len(function_calls)} tool(s) in this turn: {[fc.name for fc in function_calls]}")
-            contents.append(response_content)
+            contents.append(response.candidates[0].content)
 
-            # 6. Parallel tool calls — execute all and append all results before next LLM call
             function_response_parts = []
             for fc in function_calls:
                 name = fc.name
@@ -153,29 +151,20 @@ def run_agent():
                 types.Content(parts=function_response_parts, role="user")
             )
 
-            # Single follow-up LLM call for final answer
-            final_response = client.models.generate_content(
+            response = client.models.generate_content(
                 model=MODEL_ID,
                 contents=contents,
                 config=config,
             )
-            final_text = (final_response.text or "").strip()
-            print(f"Agent: {final_text}")
-            contents.append(
-                types.Content(
-                    role="model",
-                    parts=[types.Part.from_text(text=final_text)],
-                )
+
+        text = (response.text or "").strip()
+        print(f"Agent: {text}")
+        contents.append(
+            types.Content(
+                role="model",
+                parts=[types.Part.from_text(text=text)],
             )
-        else:
-            text = (response.text or "").strip()
-            print(f"Agent: {text}")
-            contents.append(
-                types.Content(
-                    role="model",
-                    parts=[types.Part.from_text(text=text)],
-                )
-            )
+        )
 
 
 if __name__ == "__main__":
